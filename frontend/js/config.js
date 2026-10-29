@@ -8,4 +8,4 @@ const isLocalhost = window.location.hostname === 'localhost'
     || window.location.hostname === '127.0.0.1';
 const API_ROOT = (configuredApiUrl || (isLocalhost
     ? 'http://localhost:8000'
-    : 'https://masksafe-backend.onrender.com')).replace(/\/+$/, '');
+    : 'https://masksafe-backend-q8y4.onrender.com')).replace(/\/+$/, '');
