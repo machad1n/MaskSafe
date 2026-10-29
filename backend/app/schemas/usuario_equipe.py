@@ -1,0 +1,18 @@
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class UsuarioEquipeBase(BaseModel):
+    user_id: int
+    team_id: int
+    cargo_id: int
+
+class UsuarioEquipeCreate(UsuarioEquipeBase):
+    model_config = ConfigDict(from_attributes=True)
+
+class UsuarioEquipeResponse(UsuarioEquipeBase):
+    user_team_id: int
+    criado_em: datetime
+
+    model_config = ConfigDict(from_attributes=True)

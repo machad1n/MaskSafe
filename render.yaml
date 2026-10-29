@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: masksafe-backend
+    runtime: docker
+    plan: free
+    # Runtime Docker porque o OCR (pytesseract) precisa do Tesseract instalado
+    # via apt, o que o runtime Python nativo do Render nao permite.
+    # Ver backend/Dockerfile.
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /
+    envVars:
+      # Connection string do Neon: o Render pede o valor na criação do Blueprint.
+      - key: DATABASE_URL
+        sync: false
+      # O Render gera uma chave aleatória forte automaticamente.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: FRONTEND_URL
+        value: https://masksafe.vercel.app
+      - key: FRONTEND_ORIGINS
+        value: https://masksafe.vercel.app
+      # Credenciais privadas para envio dos emails transacionais pela Brevo.
+      - key: BREVO_API_KEY
+        sync: false
+      # Remetente verificado na conta Brevo.
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: SafeMask

@@ -1,0 +1,21 @@
+bcrypt==4.0.1
+cryptography==44.0.2
+email_validator==2.2.0
+fastapi==0.115.12
+psycopg2-binary==2.9.10
+passlib==1.7.4
+pydantic==2.10.2
+python-dotenv==1.1.0
+python-jose==3.4.0
+python-multipart==0.0.27
+SQLAlchemy==2.0.40
+uvicorn==0.34.0
+sib-api-v3-sdk
+pdfplumber>=0.11.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# IA (torch/transformers) ficam em requirements-ia.txt para caber no
+# disco 1 GB do Render Free. O scanner já roda em modo regex-only sem eles
+# (ver backend/scanner/scanner.py:165-187).
+# Para IA local: pip install -r requirements-ia.txt# redeploy-forca-1791405410
