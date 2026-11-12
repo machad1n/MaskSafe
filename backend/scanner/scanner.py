@@ -21,7 +21,10 @@ from scanner.coordenadas import (
     para_pontos,
 )
 from scanner.patterns import (
+    CARTAO_CVV_PATTERN,
     CARTAO_PATTERN,
+    CARTAO_TITULAR_PATTERN,
+    CARTAO_VALIDADE_PATTERN,
     CID10_PATTERN,
     CNS_PATTERN,
     CPF_PATTERN,
@@ -148,6 +151,9 @@ def configuracoes_regex() -> dict:
     # digitos ficavam visiveis.
     return {
         "CARTAO": {"pattern": CARTAO_PATTERN.pattern, "level": 3},
+        "CARTAO_VALIDADE": {"pattern": CARTAO_VALIDADE_PATTERN.pattern, "level": 3},
+        "CARTAO_CVV": {"pattern": CARTAO_CVV_PATTERN.pattern, "level": 3},
+        "NOME_TITULAR_CARTAO": {"pattern": CARTAO_TITULAR_PATTERN.pattern, "level": 3},
         "CPF": {"pattern": CPF_PATTERN.pattern, "level": 3},
         "CNPJ": {"pattern": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b', "level": 1},
         "EMAIL": {"pattern": EMAIL_PATTERN.pattern, "level": 2},
@@ -169,6 +175,9 @@ def configuracoes_regex() -> dict:
 # sensivel e nao reserva o trecho do texto.
 VALIDADORES_REGEX = {
     "CARTAO": cartao_valido,
+    "CARTAO_VALIDADE": lambda valor: CARTAO_VALIDADE_PATTERN.fullmatch(valor) is not None,
+    "CARTAO_CVV": lambda valor: CARTAO_CVV_PATTERN.fullmatch(valor) is not None,
+    "NOME_TITULAR_CARTAO": lambda valor: CARTAO_TITULAR_PATTERN.fullmatch(valor) is not None,
 }
 
 
@@ -627,3 +636,4 @@ class DocumentScanner:
         )
         logger.info(f"PDF parcial gerado em: {caminho_parcial}")
         return caminho_parcial
+

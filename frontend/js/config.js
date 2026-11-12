@@ -9,3 +9,15 @@ const isLocalhost = window.location.hostname === 'localhost'
 const API_ROOT = (configuredApiUrl || (isLocalhost
     ? 'http://localhost:8000'
     : 'https://masksafe-backend-q8y4.onrender.com')).replace(/\/+$/, '');
+
+// Respostas da API podem trazer caminhos relativos ("/documentos/...") ou
+// URLs absolutas (quando o backend está atrás de um proxy). Concatenar as duas
+// formas produzia URLs inválidas e, em alguns ambientes, 404 no preview.
+function apiUrl(path) {
+    if (!path) return API_ROOT;
+    try {
+        return new URL(String(path), `${API_ROOT}/`).toString();
+    } catch (_) {
+        return `${API_ROOT}/${String(path).replace(/^\/+/, '')}`;
+    }
+}

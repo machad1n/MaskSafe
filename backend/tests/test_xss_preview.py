@@ -14,7 +14,10 @@ CONTEUDO_PDF_COM_JS = (
 )
 
 
-def _criar_documento(seed, caminho_conteudo, nome="ata.pdf"):
+def _criar_documento(
+    seed, caminho_conteudo, nome="ata.pdf", *,
+    original=CONTEUDO_PDF_COM_JS, censurado=CONTEUDO_PDF_COM_JS,
+):
     """Documento censurado apontando para um arquivo real em disco.
 
     Grava tambem o "original" com o mesmo hash, porque `/original` e `/parcial`
@@ -30,14 +33,14 @@ def _criar_documento(seed, caminho_conteudo, nome="ata.pdf"):
     documentos_routes.CENSURADOS_DIR.mkdir(parents=True, exist_ok=True)
     caminho_censurado = documentos_routes.CENSURADOS_DIR / f"{hash_documento}.pdf"
     caminho_original = documentos_routes.ORIGINAIS_DIR / f"{hash_documento}.pdf"
-    caminho_censurado.write_bytes(CONTEUDO_PDF_COM_JS)
-    caminho_original.write_bytes(CONTEUDO_PDF_COM_JS)
+    caminho_censurado.write_bytes(censurado)
+    caminho_original.write_bytes(original)
 
     documento = Documento(
         user_team_id=seed["user_team_a"],
         nome_original=nome,
         extensao=".pdf",
-        tamanho_bytes=len(CONTEUDO_PDF_COM_JS),
+        tamanho_bytes=len(original),
         nivel_seguranca=1,
         chave_criptografica="chave-teste",
         hash_documento=hash_documento,
@@ -104,6 +107,43 @@ def test_preview_preserva_o_conteudo_para_exibicao(client, seed, tmp_path):
     assert resp.content == CONTEUDO_PDF_COM_JS
 
 
+def test_preview_censurado_e_rota_original_servem_arquivos_separados(client, seed, tmp_path):
+    original_bytes = b"%PDF-1.4\nARQUIVO ORIGINAL EXATO\n%%EOF\n"
+    censurado_bytes = b"%PDF-1.4\nARQUIVO COM TARJA\n%%EOF\n"
+    documento = _criar_documento(
+        seed, tmp_path / "separacao.pdf", original=original_bytes,
+        censurado=censurado_bytes,
+    )
+    headers = _token(seed["usuario"])
+
+    preview = client.get(
+        f"/documentos/censurados/{documento.doc_id}/arquivo", headers=headers
+    )
+    original = client.get(f"/documentos/{documento.doc_id}/original", headers=headers)
+
+    assert preview.status_code == original.status_code == 200
+    assert preview.content == censurado_bytes
+    assert original.content == original_bytes
+    assert preview.content != original.content
+
+
+def test_metadados_preview_usam_rota_protegida_e_isolam_outra_organizacao(
+    client, seed, tmp_path
+):
+    documento = _criar_documento(seed, tmp_path / "preview-protegido.pdf")
+    rota = f"/documentos/censurados/{documento.doc_id}"
+
+    sem_sessao = client.get(rota)
+    metadados = client.get(rota, headers=_token(seed["usuario"]))
+    outro_tenant = client.get(rota, headers=_token(seed["usuario_globex"]))
+
+    assert sem_sessao.status_code == 401
+    assert metadados.status_code == 200
+    assert metadados.json()["preview_url"] == f"/documentos/censurados/{documento.doc_id}/arquivo"
+    assert client.get(metadados.json()["preview_url"], headers=_token(seed["usuario"])).status_code == 200
+    assert outro_tenant.status_code == 404
+
+
 def test_original_e_parcial_tambem_travam_script(client, seed, tmp_path):
     """Original e parcial tambem sao conteudo do usuario."""
     from app.core import file_responses
@@ -147,3 +187,4 @@ def test_nome_do_arquivo_nao_injeta_header(client, seed, tmp_path):
     assert disposition.count("filename") == 1
     assert "\n" not in disposition
     assert "\r" not in disposition
+

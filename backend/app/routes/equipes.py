@@ -1,7 +1,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core import autorizacao, tenancy
 from app.core.current_user import get_current_user
@@ -70,6 +70,7 @@ def _serialize_member(member_row) -> dict:
     return {
         "user_team_id": member_row.user_team_id,
         "user_id": member_row.user_id,
+        "cargo_id": member_row.cargo_id,
         "nome": member_row.nome,
         "email": member_row.email,
         "cargo_nome": member_row.cargo_nome,
@@ -101,23 +102,10 @@ def _load_team_detail(db: Session, current_user: Usuario, team_id: int):
     if not team_row:
         return None
 
-    user_team_ids = [
-        row.user_team_id
-        for row in (
-            db.query(UsuarioEquipe.user_team_id)
-            .join(Usuario, Usuario.user_id == UsuarioEquipe.user_id)
-            .filter(
-                UsuarioEquipe.team_id == team_id,
-                UsuarioEquipe.user_id == current_user.user_id,
-                Usuario.organizacao_id == team_row.organizacao_id,
-            )
-            .all()
-        )
-    ]
-
     members = (
         db.query(
             UsuarioEquipe.user_team_id,
+            UsuarioEquipe.cargo_id,
             Usuario.user_id,
             Usuario.nome,
             Usuario.email,
@@ -130,6 +118,7 @@ def _load_team_detail(db: Session, current_user: Usuario, team_id: int):
         .filter(
             UsuarioEquipe.team_id == team_id,
             Usuario.organizacao_id == team_row.organizacao_id,
+            Usuario.is_system.is_(False),
         )
         .order_by(Cargo.nivel.desc(), Usuario.nome)
         .all()
@@ -194,8 +183,10 @@ def _load_team_detail(db: Session, current_user: Usuario, team_id: int):
                 "autor_nome": row.autor_nome,
                 "cargo_nome": row.cargo_nome,
                 "user_team_id": row.user_team_id,
-                "tem_acesso": row.user_team_id in user_team_ids,
-                "preview_url": f"/documentos/censurados/{row.doc_id}/arquivo" if row.user_team_id in user_team_ids else None,
+                # A rota ja confirmou que o usuário atual pertence a esta
+                # equipe; documentos arquivados continuam acessíveis por equipe.
+                "tem_acesso": True,
+                "preview_url": f"/documentos/censurados/{row.doc_id}/arquivo",
             }
             for row in documentos_rows
         ],
@@ -208,6 +199,7 @@ def get_equipes_overview(
         current_user: Usuario = Depends(get_current_user)
     ):
     organizacao_id = tenancy.exigir_organizacao(current_user)
+    vinculo_documento = aliased(UsuarioEquipe)
     team_rows = (
         db.query(
             Equipe.team_id,
@@ -219,7 +211,8 @@ def get_equipes_overview(
         )
         .join(UsuarioEquipe, UsuarioEquipe.team_id == Equipe.team_id)
         .join(Usuario, Usuario.user_id == UsuarioEquipe.user_id)
-        .outerjoin(Documento, (Documento.user_team_id == UsuarioEquipe.user_team_id) & Documento.ativo.is_(True))
+        .outerjoin(vinculo_documento, vinculo_documento.team_id == Equipe.team_id)
+        .outerjoin(Documento, (Documento.user_team_id == vinculo_documento.user_team_id) & Documento.ativo.is_(True))
         .filter(
             UsuarioEquipe.user_id == current_user.user_id,
             Equipe.organizacao_id == organizacao_id,
@@ -237,6 +230,7 @@ def get_equipes_overview(
         membros_rows = (
             db.query(
                 UsuarioEquipe.user_team_id,
+                UsuarioEquipe.cargo_id,
                 Usuario.user_id,
                 Usuario.nome,
                 Usuario.email,
@@ -249,6 +243,7 @@ def get_equipes_overview(
             .filter(
                 UsuarioEquipe.team_id == row.team_id,
                 Usuario.organizacao_id == organizacao_id,
+                Usuario.is_system.is_(False),
             )
             .order_by(Cargo.nivel.desc(), Usuario.nome)
             .all()
@@ -299,6 +294,7 @@ def get_equipes_overview(
 @router.get("/form-data", response_model=dict)
 def get_form_data(
         query: str = "",
+        team_id: int | None = None,
         db: Session = Depends(get_db),
         current_user: Usuario = Depends(get_current_user)
     ):
@@ -319,6 +315,7 @@ def get_form_data(
             .filter(
                 Usuario.user_id != current_user.user_id,
                 Usuario.organizacao_id == organizacao_id,
+                Usuario.is_system.is_(False),
                 UsuarioEquipe.team_id.in_(team_ids),
             )
             .group_by(Usuario.user_id, Usuario.nome, Usuario.email)
@@ -337,7 +334,34 @@ def get_form_data(
         ]
 
     linked_user_ids = []
-    if team_ids:
+    if team_id is not None:
+        team = (
+            db.query(Equipe)
+            .join(UsuarioEquipe, UsuarioEquipe.team_id == Equipe.team_id)
+            .filter(
+                Equipe.team_id == team_id,
+                Equipe.organizacao_id == organizacao_id,
+                UsuarioEquipe.user_id == current_user.user_id,
+            )
+            .first()
+        )
+        if not team:
+            raise HTTPException(status_code=404, detail="Equipe não encontrada para o usuário atual.")
+        linked_user_ids = [
+            row.user_id
+            for row in (
+                db.query(UsuarioEquipe.user_id)
+                .join(Usuario, Usuario.user_id == UsuarioEquipe.user_id)
+                .filter(
+                    UsuarioEquipe.team_id == team_id,
+                    Usuario.organizacao_id == organizacao_id,
+                    Usuario.is_system.is_(False),
+                )
+                .distinct()
+                .all()
+            )
+        ]
+    elif team_ids:
         linked_user_ids = [
             row.user_id
             for row in (
@@ -346,6 +370,7 @@ def get_form_data(
                 .filter(
                     UsuarioEquipe.team_id.in_(team_ids),
                     Usuario.organizacao_id == organizacao_id,
+                    Usuario.is_system.is_(False),
                 )
                 .distinct()
                 .all()
@@ -361,6 +386,7 @@ def get_form_data(
         # Sugerir membros e listar usuarios e uma busca global. Sem este
         # filtro a tela de criar equipe oferecia usuarios de outras empresas.
         Usuario.organizacao_id == organizacao_id,
+        Usuario.is_system.is_(False),
     )
 
     if linked_user_ids:
@@ -384,9 +410,15 @@ def get_form_data(
         for row in available_users_query.order_by(Usuario.nome).limit(12).all()
     ]
 
+    cargos = [
+        {"cargo_id": cargo.cargo_id, "nome": cargo.nome, "nivel": int(cargo.nivel)}
+        for cargo in db.query(Cargo).order_by(Cargo.nivel.asc(), Cargo.nome).all()
+    ]
+
     return {
         "membros_sugeridos": suggested_members,
         "usuarios_disponiveis": available_users,
+        "cargos_disponiveis": cargos,
     }
 
 

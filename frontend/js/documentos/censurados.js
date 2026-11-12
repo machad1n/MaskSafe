@@ -19,6 +19,12 @@ const loadingStepLabel = document.getElementById('loadingStepLabel');
 const loadingFileName = document.getElementById('loadingFileName');
 const loadingBadgeRedaction = document.getElementById('loadingBadgeRedaction');
 const loadingBadgeTeams = document.getElementById('loadingBadgeTeams');
+const docsActionMessage = document.getElementById('docsActionMessage');
+const deleteDocModal = document.getElementById('deleteDocModal');
+const deleteDocName = document.getElementById('deleteDocName');
+const deleteDocError = document.getElementById('deleteDocError');
+const confirmDeleteDocBtn = document.getElementById('confirmDeleteDocBtn');
+const cancelDeleteDocBtn = document.getElementById('cancelDeleteDocBtn');
 
 const API_DOCUMENTS = `${API_ROOT}/documentos/censurados`;
 const initialDocId = Number(new URLSearchParams(window.location.search).get('doc_id'));
@@ -30,6 +36,9 @@ const state = {
     selectedDoc: null,
     previewObjectUrl: null,
     loadingTimeoutId: null,
+    previewRequestId: 0,
+    selectionRequestId: 0,
+    pendingDeleteDoc: null,
 };
 
 function escapeHtml(value) {
@@ -94,6 +103,26 @@ function clearPreviewUrl() {
     }
 }
 
+function handleUnauthorized() {
+    if (window.AppShell?.Sessao?.limpar) {
+        window.AppShell.Sessao.limpar();
+    } else {
+        localStorage.removeItem('token');
+    }
+    window.location.href = '../auth/login.html';
+}
+
+function showDocsMessage(message, kind = 'success') {
+    docsActionMessage.textContent = message;
+    docsActionMessage.className = `docs-action-message ${kind}`;
+    docsActionMessage.hidden = false;
+}
+
+function showPreviewFallback(title, message) {
+    detailPreviewFallback.innerHTML = `<strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>`;
+    detailPreviewFallback.hidden = false;
+}
+
 function renderDocumentsList() {
     docsCountPill.textContent = `${state.documentos.length} documento(s)`;
 
@@ -123,8 +152,9 @@ function renderDocumentsList() {
                     <span class="doc-tag">Tamanho: ${escapeHtml(formatBytes(documento.tamanho_bytes))}</span>
                 </div>
                 <div class="doc-actions">
-                    <button type="button" class="cta-censor" data-action="redact" data-doc-id="${documento.doc_id}">Ver Arquivo Original</button>
+                    <button type="button" class="cta-censor" data-action="redact" data-doc-id="${documento.doc_id}">Visualizar documento</button>
                     <button type="button" class="ghost-button" data-action="details" data-doc-id="${documento.doc_id}">Detalhes</button>
+                    ${documento.pode_excluir ? `<button type="button" class="danger-button" data-action="delete" data-doc-id="${documento.doc_id}">Excluir</button>` : ''}
                 </div>
             </article>
         `)
@@ -132,14 +162,14 @@ function renderDocumentsList() {
 }
 
 function renderDocumentDetails(documento) {
+    const previewRequestId = ++state.previewRequestId;
+    clearTimeout(state.loadingTimeoutId);
     if (!documento) {
         clearPreviewUrl();
         detailPreviewFrame.src = 'about:blank';
-        detailPreviewFallback.hidden = false;
-        detailPreviewFallback.innerHTML = `
-            <strong>Selecione um documento</strong>
-            <p>Escolha um item na lista para ver a preview do documento censurado e a identificação do documento.</p>
-        `;
+        detailPreviewFrame.onload = null;
+        state.selectedDoc = null;
+        showPreviewFallback('Selecione um documento', 'Escolha um item na lista para ver o PDF censurado e os dados do documento.');
         toggleDetailState(false);
         return;
     }
@@ -152,57 +182,69 @@ function renderDocumentDetails(documento) {
     detailCryptoKey.textContent = documento.doc_id || '-';
 
     clearPreviewUrl();
-    detailPreviewFallback.hidden = false;
-    detailPreviewFallback.innerHTML = `
-        <strong>Carregando preview</strong>
-        <p>Buscando o arquivo protegido para exibir o documento completo.</p>
-    `;
+    showPreviewFallback('Carregando preview', 'Buscando o PDF censurado para exibição.');
     detailPreviewFrame.src = 'about:blank';
     detailPreviewFrame.onload = null;
+    toggleDetailState(true);
+    renderDocumentsList();
 
     if (documento.preview_url) {
         const token = localStorage.getItem('token');
-        if (token) {
-            fetch(`${API_ROOT}${documento.preview_url}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            })
-                .then((response) => {
-                    if (!response.ok) {
-                        throw new Error('Falha ao carregar preview.');
-                    }
-
-                    return response.blob();
-                })
-                .then((blob) => {
-                    state.previewObjectUrl = URL.createObjectURL(blob);
-                    detailPreviewFrame.onload = () => {
-                        detailPreviewFallback.hidden = true;
-                    };
-                    detailPreviewFrame.style.zIndex = '1';
-                    detailPreviewFrame.src = state.previewObjectUrl;
-                    detailPreviewFallback.hidden = true;
-                })
-                .catch((error) => {
-                    console.error(error);
-                    detailPreviewFallback.innerHTML = `
-                        <strong>Preview indisponível</strong>
-                        <p>O arquivo existe, mas não pôde ser renderizado no navegador. O documento continua acessível pelos metadados.</p>
-                    `;
-                    detailPreviewFallback.hidden = false;
-                });
+        if (!token) {
+            handleUnauthorized();
+            return;
         }
+        fetch(apiUrl(documento.preview_url), {
+            cache: 'no-store',
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        })
+            .then(async (response) => {
+                if (response.status === 401) {
+                    handleUnauthorized();
+                    throw new Error('Sessão expirada. Entre novamente.');
+                }
+                if (!response.ok) {
+                    throw new Error(`O servidor não conseguiu carregar o PDF (HTTP ${response.status}).`);
+                }
+                const blob = await response.blob();
+                if (!blob.size || !(await blob.slice(0, 5).text()).startsWith('%PDF-')) {
+                    throw new Error('A resposta recebida não é um PDF válido.');
+                }
+                return blob;
+            })
+            .then((blob) => {
+                if (previewRequestId !== state.previewRequestId) return;
+                state.previewObjectUrl = URL.createObjectURL(blob);
+                detailPreviewFrame.onload = () => {
+                    if (previewRequestId !== state.previewRequestId) return;
+                    clearTimeout(state.loadingTimeoutId);
+                    detailPreviewFallback.hidden = true;
+                };
+                detailPreviewFrame.onerror = () => {
+                    if (previewRequestId === state.previewRequestId) {
+                        clearTimeout(state.loadingTimeoutId);
+                        showPreviewFallback('Preview indisponível', 'O navegador não conseguiu renderizar este PDF.');
+                    }
+                };
+                detailPreviewFrame.src = state.previewObjectUrl;
+                state.loadingTimeoutId = setTimeout(() => {
+                    if (previewRequestId === state.previewRequestId) {
+                        showPreviewFallback('O preview está demorando', 'O PDF foi carregado, mas o navegador ainda não confirmou a renderização. Tente atualizar a página.');
+                    }
+                }, 12000);
+            })
+            .catch((error) => {
+                if (previewRequestId !== state.previewRequestId) return;
+                console.error(error);
+                if (localStorage.getItem('token')) {
+                    showPreviewFallback('Preview indisponível', error.message || 'Não foi possível carregar o PDF autorizado.');
+                }
+            });
     } else {
-        detailPreviewFallback.innerHTML = `
-            <strong>Preview indisponível</strong>
-            <p>Este documento não possui arquivo para exibição.</p>
-        `;
-        detailPreviewFallback.hidden = false;
+        showPreviewFallback('Preview indisponível', 'Este documento não possui um endereço de arquivo para exibição.');
     }
-
-    toggleDetailState(true);
-    renderDocumentsList();
 }
 
 async function loadDocumentDetails(docId) {
@@ -212,15 +254,15 @@ async function loadDocumentDetails(docId) {
         return;
     }
 
-    const response = await fetch(`${API_DOCUMENTS}/${docId}`, {
+    const response = await fetch(apiUrl(`/documentos/censurados/${docId}`), {
+        cache: 'no-store',
         headers: {
             Authorization: `Bearer ${token}`,
         },
     });
 
     if (response.status === 401) {
-        localStorage.removeItem('token');
-        window.location.href = '../auth/login.html';
+        handleUnauthorized();
         return;
     }
 
@@ -232,23 +274,24 @@ async function loadDocumentDetails(docId) {
 }
 
 async function loadDocuments() {
+    const selectionRequestId = ++state.selectionRequestId;
     const token = localStorage.getItem('token');
     if (!token) {
-        window.location.href = '../auth/login.html';
-        return;
+        handleUnauthorized();
+        return false;
     }
 
     try {
-        const response = await fetch(API_DOCUMENTS, {
+        const response = await fetch(apiUrl('/documentos/censurados'), {
+            cache: 'no-store',
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
 
         if (response.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '../auth/login.html';
-            return;
+            handleUnauthorized();
+            return false;
         }
 
         if (!response.ok) {
@@ -264,8 +307,13 @@ async function loadDocuments() {
         if (state.documentos.length) {
             const initialDocument = state.documentos.find((documento) => Number(documento.doc_id) === initialDocId) || state.documentos[0];
             const detalheInicial = await loadDocumentDetails(initialDocument.doc_id);
-            renderDocumentDetails(detalheInicial);
+            if (selectionRequestId === state.selectionRequestId && detalheInicial) {
+                renderDocumentDetails(detalheInicial);
+            }
+        } else {
+            renderDocumentDetails(null);
         }
+        return true;
     } catch (error) {
         console.error(error);
         docsEmptyState.innerHTML = `
@@ -274,6 +322,7 @@ async function loadDocuments() {
         `;
         docsList.innerHTML = '';
         toggleDetailState(false);
+        return false;
     }
 }
 
@@ -281,11 +330,84 @@ goToUploadBtn.addEventListener('click', () => {
     window.location.href = 'censurar.html';
 });
 
+function closeDeleteDocModal() {
+    deleteDocModal.classList.remove('open');
+    deleteDocModal.hidden = true;
+    state.pendingDeleteDoc = null;
+    deleteDocError.textContent = '';
+    confirmDeleteDocBtn.disabled = false;
+}
+
+function openDeleteDocModal(documento) {
+    state.pendingDeleteDoc = documento;
+    deleteDocName.textContent = documento.nome_original || 'Documento selecionado';
+    deleteDocError.textContent = '';
+    deleteDocModal.hidden = false;
+    requestAnimationFrame(() => deleteDocModal.classList.add('open'));
+    cancelDeleteDocBtn.focus();
+}
+
+async function confirmDeleteDocument() {
+    if (!state.pendingDeleteDoc) return;
+    const documento = state.pendingDeleteDoc;
+    const token = localStorage.getItem('token');
+    if (!token) {
+        handleUnauthorized();
+        return;
+    }
+
+    confirmDeleteDocBtn.disabled = true;
+    deleteDocError.textContent = '';
+    try {
+        const response = await fetch(apiUrl(`/documentos/${documento.doc_id}`), {
+            method: 'DELETE',
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.status === 401) {
+            handleUnauthorized();
+            return;
+        }
+        if (!response.ok) {
+            let message = 'Não foi possível excluir o documento.';
+            try {
+                const data = await response.json();
+                message = data.detail || message;
+            } catch (_) {
+                // Respostas não JSON mantêm a mensagem segura e legível.
+            }
+            throw new Error(message);
+        }
+
+        closeDeleteDocModal();
+        state.selectedDoc = null;
+        const listaAtualizada = await loadDocuments();
+        showDocsMessage(
+            listaAtualizada
+                ? 'Documento excluído com sucesso.'
+                : 'Documento excluído, mas a listagem não pôde ser atualizada. Atualize a página para recarregar os dados.',
+            listaAtualizada ? 'success' : 'error',
+        );
+    } catch (error) {
+        console.error(error);
+        deleteDocError.textContent = error.message || 'Não foi possível excluir o documento.';
+        confirmDeleteDocBtn.disabled = false;
+    }
+}
+
 docsList.addEventListener('click', (event) => {
     const redactionButton = event.target.closest('[data-action="redact"]');
     if (redactionButton) {
         const docId = Number(redactionButton.dataset.docId);
         window.location.href = `descensura.html?doc_id=${docId}`;
+        return;
+    }
+
+    const deleteButton = event.target.closest('[data-action="delete"]');
+    if (deleteButton) {
+        const docId = Number(deleteButton.dataset.docId);
+        const selected = state.documentos.find((documento) => Number(documento.doc_id) === docId);
+        if (selected?.pode_excluir) openDeleteDocModal(selected);
         return;
     }
 
@@ -297,31 +419,71 @@ docsList.addEventListener('click', (event) => {
     const docId = Number(button.dataset.docId);
     const selected = state.documentos.find((documento) => Number(documento.doc_id) === docId);
     if (selected) {
+        const selectionRequestId = ++state.selectionRequestId;
         loadDocumentDetails(docId)
-            .then(renderDocumentDetails)
+            .then((detalhe) => {
+                if (selectionRequestId === state.selectionRequestId && detalhe) {
+                    renderDocumentDetails(detalhe);
+                }
+            })
             .catch((error) => {
                 console.error(error);
-                alert('Nao foi possivel carregar os detalhes do documento.');
+                showDocsMessage(error.message || 'Não foi possível carregar os detalhes do documento.', 'error');
             });
     }
 });
 
 undoRedactionBtn.addEventListener('click', () => {
     if (!state.selectedDoc) {
-        alert('Selecione um documento para descensurar.');
+        showDocsMessage('Selecione um documento antes de abrir as opções de acesso.', 'error');
         return;
     }
     window.location.href = `descensura.html?doc_id=${state.selectedDoc.doc_id}`;
 });
 
 closeDetailsBtn.addEventListener('click', () => {
+    state.selectionRequestId += 1;
+    state.previewRequestId += 1;
+    clearTimeout(state.loadingTimeoutId);
     clearPreviewUrl();
     detailPreviewFrame.onload = null;
+    detailPreviewFrame.onerror = null;
+    detailPreviewFrame.src = 'about:blank';
     toggleDetailState(false);
     state.selectedDoc = null;
     renderDocumentsList();
 });
 
-window.addEventListener('beforeunload', clearPreviewUrl);
+confirmDeleteDocBtn.addEventListener('click', confirmDeleteDocument);
+cancelDeleteDocBtn.addEventListener('click', closeDeleteDocModal);
+deleteDocModal.addEventListener('click', (event) => {
+    if (event.target === deleteDocModal) closeDeleteDocModal();
+});
+window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !deleteDocModal.hidden) closeDeleteDocModal();
+});
+
+window.addEventListener('pagehide', () => {
+    clearTimeout(state.loadingTimeoutId);
+    clearPreviewUrl();
+    detailPreviewFrame.onload = null;
+    detailPreviewFrame.onerror = null;
+    detailPreviewFrame.src = 'about:blank';
+});
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) loadDocuments();
+});
+window.addEventListener('storage', (event) => {
+    if (event.key !== 'token') return;
+    if (!event.newValue) {
+        clearPreviewUrl();
+        detailPreviewFrame.src = 'about:blank';
+        handleUnauthorized();
+        return;
+    }
+    loadDocuments();
+});
 
 loadDocuments();
+
+

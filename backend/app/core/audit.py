@@ -7,6 +7,7 @@ O SRS (RN-010) exige que acesso e operacoes criticas fiquem registrados em
 import ipaddress
 import logging
 import os
+from datetime import datetime
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ ACAO_REENVIO_CONFIRMAR_EMAIL = "reenviar_confirmacao_email"
 ACAO_UPLOAD = "upload_documento"
 ACAO_UPLOAD_CENSURADO = "upload_documento_censurado"
 ACAO_LISTAR_DOCUMENTOS = "listar_documentos"
+ACAO_EXCLUIR_DOCUMENTO = "excluir_documento"
 ACAO_VER_ORIGINAL = "ver_original"
 ACAO_VER_PARCIAL = "ver_parcial"
 ACAO_VER_CENSURADO = "ver_censurado"
@@ -93,6 +95,7 @@ def registrar(
     acao: str,
     *,
     commit: bool = True,
+    data_hora: datetime | None = None,
 ) -> LogAuditoria:
     """Grava uma linha de auditoria.
 
@@ -103,6 +106,7 @@ def registrar(
         user_id=user_id,
         acao=acao[:100],
         ip_origem=ip_do_cliente(request),
+        data_hora=data_hora,
     )
     try:
         db.add(entrada)
@@ -125,3 +129,4 @@ def registrar_falha_login(db: Session, request: Request | None, user_id: int | N
     if user_id is None:
         return
     registrar(db, request, user_id, ACAO_LOGIN_FALHO)
+

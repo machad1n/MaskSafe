@@ -191,7 +191,9 @@ def test_nivel_do_ner_bate_com_o_do_regex():
 def test_niveis_do_regex_sao_os_niveis_documentados():
     """Trava a escala que o resto do sistema assume (1 supervisor, 3 lider)."""
     assert _niveis_do_regex() == {
-        "CARTAO": 3, "CPF": 3, "CNPJ": 1, "EMAIL": 2, "TELEFONE": 2, "CNS": 3,
+        "CARTAO": 3, "CARTAO_VALIDADE": 3, "CARTAO_CVV": 3,
+        "NOME_TITULAR_CARTAO": 3, "CPF": 3, "CNPJ": 1, "EMAIL": 2,
+        "TELEFONE": 2, "CNS": 3,
         "CID10": 3, "CRM": 3, "RG": 3, "PROCESSO": 1, "DATA_NASC": 2,
         "ENDERECO": 1,
     }
@@ -292,3 +294,4 @@ def test_cartao_vem_antes_do_telefone_na_ordem_dos_regex():
 
     tipos = list(configuracoes_regex())
     assert tipos.index("CARTAO") < tipos.index("TELEFONE")
+

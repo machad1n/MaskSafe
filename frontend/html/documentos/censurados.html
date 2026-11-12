@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../../css/dashboard.css">
     <link rel="stylesheet" href="../../css/brand.css">
-    <link rel="stylesheet" href="../../css/documentos/censurados.css">
+    <link rel="stylesheet" href="../../css/documentos/censurados.css?v=3">
 </head>
 <body>
     <div id="appShell"></div>
@@ -26,6 +26,8 @@
                     </div>
                 </div>
             </section>
+
+            <div id="docsActionMessage" class="docs-action-message" role="status" aria-live="polite" hidden></div>
 
             <section class="censored-layout">
                 <article class="panel panel-sig docs-list-panel reveal">
@@ -101,11 +103,24 @@
             </section>
     </main>
 
+    <div id="deleteDocModal" class="doc-modal" role="presentation" hidden>
+        <section class="doc-modal__panel" role="dialog" aria-modal="true" aria-labelledby="deleteDocTitle">
+            <span class="panel-kicker">Ação permanente</span>
+            <h2 id="deleteDocTitle">Excluir documento?</h2>
+            <p>O documento <strong id="deleteDocName"></strong> será removido desta equipe. Se outra equipe ainda usar os mesmos arquivos, eles serão preservados para essa equipe.</p>
+            <p id="deleteDocError" class="doc-modal__error" role="alert"></p>
+            <div class="doc-modal__actions">
+                <button type="button" class="ghost-button" id="cancelDeleteDocBtn">Cancelar</button>
+                <button type="button" class="danger-button" id="confirmDeleteDocBtn">Excluir documento</button>
+            </div>
+        </section>
+    </div>
+
     <script>window.APP_SHELL = { acoes: [{ id: 'goToUploadBtn', texto: 'Novo Upload' }] };</script>
     <script src="../../js/session.js"></script>
     <script src="../../js/app-shell.js"></script>
     <script src="../../js/config.js?v=2"></script>
-    <script src="../../js/documentos/censurados.js?v=2"></script>
+    <script src="../../js/documentos/censurados.js?v=3"></script>
     <script src="../../js/brand.js?v=2"></script>
 </body>
 </html>

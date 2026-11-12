@@ -41,6 +41,68 @@ def test_editar_equipe_e_adicionar_remover_membro(client, seed):
     assert client.delete(f"/equipes/{tid}/membros/{link_id}", headers=headers).status_code == 200
 
 
+def test_busca_candidatos_equipa_exclui_apenas_membros_da_equipe(client, seed):
+    db = seed["db"]
+    org_id = seed["organizacao"].organizacao_id
+    user_atual = Usuario(
+        nome="Ja na equipe",
+        email="ja-na-equipe@acme.test",
+        senha_hash="x",
+        organizacao_id=org_id,
+    )
+    user_outra_equipe = Usuario(
+        nome="Outra equipe",
+        email="outra-equipe@acme.test",
+        senha_hash="x",
+        organizacao_id=org_id,
+    )
+    user_disponivel = Usuario(
+        nome="Disponivel",
+        email="disponivel@acme.test",
+        senha_hash="x",
+        organizacao_id=org_id,
+    )
+    db.add_all([user_atual, user_outra_equipe, user_disponivel])
+    db.flush()
+    db.add_all([
+        UsuarioEquipe(
+            user_id=user_atual.user_id,
+            team_id=seed["equipe_a"].team_id,
+            cargo_id=seed["cargo_membro"].cargo_id,
+        ),
+        UsuarioEquipe(
+            user_id=user_outra_equipe.user_id,
+            team_id=seed["equipe_b"].team_id,
+            cargo_id=seed["cargo_membro"].cargo_id,
+        ),
+    ])
+    db.commit()
+
+    response = client.get(
+        f"/equipes/form-data?team_id={seed['equipe_a'].team_id}",
+        headers=auth(seed["usuario"]),
+    )
+
+    assert response.status_code == 200, response.text
+    candidate_ids = {user["user_id"] for user in response.json()["usuarios_disponiveis"]}
+    assert user_atual.user_id not in candidate_ids
+    assert user_outra_equipe.user_id in candidate_ids
+    assert user_disponivel.user_id in candidate_ids
+
+
+def test_form_data_expoe_cargos_para_edicao_no_modal(client, seed):
+    response = client.get(
+        f"/equipes/form-data?team_id={seed['equipe_a'].team_id}",
+        headers=auth(seed["usuario"]),
+    )
+
+    assert response.status_code == 200, response.text
+    cargos = response.json()["cargos_disponiveis"]
+    cargo_ids = {cargo["cargo_id"] for cargo in cargos}
+    assert seed["cargo_membro"].cargo_id in cargo_ids
+    assert seed["cargo_lider"].cargo_id in cargo_ids
+
+
 def test_operacoes_equipes_negam_membro_comum_e_isolam_tenant(client, seed):
     db = seed["db"]
     member = Usuario(

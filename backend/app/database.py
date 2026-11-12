@@ -73,6 +73,19 @@ def garantir_indices():
         "CREATE INDEX IF NOT EXISTS idx_equipe_organizacao_id ON equipe(organizacao_id)",
         "CREATE INDEX IF NOT EXISTS idx_usuario_organizacao_id ON usuario(organizacao_id)",
     ]
+    tabelas = set(inspect(engine).get_table_names())
+    if "log_auditoria" in tabelas:
+        colunas_log = {coluna["name"] for coluna in inspect(engine).get_columns("log_auditoria")}
+        if {"user_id", "acao", "data_hora"} <= colunas_log:
+            indices.append(
+                "CREATE INDEX IF NOT EXISTS idx_log_auditoria_user_acao_data "
+                "ON log_auditoria(user_id, acao, data_hora)"
+            )
+        if {"ip_origem", "acao", "data_hora"} <= colunas_log:
+            indices.append(
+                "CREATE INDEX IF NOT EXISTS idx_log_auditoria_ip_acao_data "
+                "ON log_auditoria(ip_origem, acao, data_hora)"
+            )
     with engine.begin() as conn:
         for ddl in indices:
             conn.execute(text(ddl))
@@ -118,6 +131,33 @@ def garantir_schema_documentos():
                     "ADD COLUMN cpf_censurados INTEGER NOT NULL DEFAULT 0"
                 )
             )
+
+
+def garantir_schema_conta(bind=None):
+    """Adiciona armazenamento da foto e identidade de arquivo de conta."""
+    bind = bind or engine
+    inspector = inspect(bind)
+    if "usuario" not in set(inspector.get_table_names()):
+        return
+    colunas = {coluna["name"] for coluna in inspector.get_columns("usuario")}
+    alteracoes = []
+    if "foto_perfil" not in colunas:
+        tipo_binario = "BYTEA" if bind.dialect.name == "postgresql" else "BLOB"
+        alteracoes.append(f"ALTER TABLE usuario ADD COLUMN foto_perfil {tipo_binario}")
+    if "foto_perfil_tipo" not in colunas:
+        alteracoes.append("ALTER TABLE usuario ADD COLUMN foto_perfil_tipo VARCHAR(32)")
+    if "is_system" not in colunas:
+        alteracoes.append(
+            "ALTER TABLE usuario ADD COLUMN is_system BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    with bind.begin() as conn:
+        for ddl in alteracoes:
+            conn.execute(text(ddl))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_usuario_is_system ON usuario (is_system)"))
+        conn.execute(text(
+            "UPDATE usuario SET is_system = TRUE "
+            "WHERE email = '__tentativa_desconhecida__@safemask.local'"
+        ))
 
 
 def garantir_schema_autenticacao(bind=engine):
@@ -225,6 +265,7 @@ def garantir_schema_organizacoes():
     _garantir_espaco_coordenadas(inspector, tabelas)
     _garantir_token_version(inspector, tabelas)
     _garantir_email_verificado(engine)
+    garantir_schema_conta()
 
     _preencher_organizacoes_pendentes()
 
@@ -323,3 +364,4 @@ def _preencher_organizacoes_pendentes():
 
 if __name__ == "__main__":
     criar_tabelas()
+

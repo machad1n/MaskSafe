@@ -1,4 +1,4 @@
-from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, String
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -19,6 +19,9 @@ class Usuario(Base):
     email = Column(String(129), unique=True, nullable=False)
     senha_hash = Column(String(255), nullable=False)
     email_verificado = Column(Boolean, nullable=False, default=True, server_default="true")
+    foto_perfil = Column(LargeBinary, nullable=True)
+    foto_perfil_tipo = Column(String(32), nullable=True)
+    is_system = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
     # Sobe a cada troca de senha. O access token carrega o valor com que foi
     # emitido; um token anterior deixa de servir quando a versao muda. E o que
     # corta o acesso de quem roubou a senha antiga.

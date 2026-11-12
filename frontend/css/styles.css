@@ -329,24 +329,6 @@ body {
     color: var(--primary);
 }
 
-.social-icons {
-    display: flex;
-    gap: 1rem;
-}
-
-.social-icons a {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, var(--primary), var(--primary-strong));
-    color: #04120a;
-    border-radius: 50%;
-    text-decoration: none;
-    font-weight: bold;
-}
-
 .footer-bottom {
     text-align: center;
     padding-top: 2rem;
@@ -399,3 +381,4 @@ body {
         grid-template-columns: 1fr;
     }
 }
+

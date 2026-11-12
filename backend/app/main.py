@@ -12,12 +12,13 @@ from app.database import (
     engine,
     garantir_indices,
     garantir_schema_autenticacao,
+    garantir_schema_conta,
     garantir_schema_documentos,
     garantir_schema_equipes,
     garantir_schema_organizacoes,
 )
 from app.models.cargo import Cargo
-from app.routes import auth, dashboard, documentos, equipes
+from app.routes import account, auth, dashboard, documentos, equipes
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ def seed_cargos():
 
 Base.metadata.create_all(bind=engine)
 garantir_schema_autenticacao()
+garantir_schema_conta()
 garantir_schema_equipes()
 garantir_schema_documentos()
 # Antes de garantir_indices(): os indices de tenant so podem ser criados
@@ -73,6 +75,7 @@ seed_cargos()
 logger.info("Configuracao ativa: %s", descrever())
 
 app.include_router(auth.router)
+app.include_router(account.router)
 app.include_router(dashboard.router)
 app.include_router(equipes.router)
 app.include_router(documentos.router)
@@ -80,3 +83,4 @@ app.include_router(documentos.router)
 @app.get("/")
 def home():
     return{"status": "online", "mensagem": "Bem vindo a API"}
+
