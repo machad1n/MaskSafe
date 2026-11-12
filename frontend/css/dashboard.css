@@ -225,10 +225,13 @@ body {
     background: transparent;
     color: var(--text);
     width: 100%;
+    display: block;
     text-align: left;
     border-radius: 8px;
     padding: 0.55rem 0.65rem;
     cursor: pointer;
+    text-decoration: none;
+    font: inherit;
 }
 
 .dropdown-item:hover {
@@ -576,3 +579,4 @@ body {
         text-align: center;
     }
 }
+

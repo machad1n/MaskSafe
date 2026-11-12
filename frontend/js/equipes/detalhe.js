@@ -14,6 +14,13 @@ const teamDocsCount = document.getElementById('teamDocsCount');
 
 const API_BASE = `${API_ROOT}/equipes`;
 const storedName = localStorage.getItem('userName') || 'Usuario';
+let currentTeam = null;
+const selectedTeamMembers = new Map();
+let teamMemberCandidates = [];
+let teamMemberSearchTimer = null;
+let teamActionMessageTimer = null;
+let teamRoles = [];
+let pendingMemberAction = null;
 function escapeHtml(value) {
     return String(value)
         .replace(/&/g, '&amp;')
@@ -82,6 +89,7 @@ function getTeamId() {
 }
 
 function renderTeam(team) {
+    currentTeam = team;
     if (!team) {
         teamNameHeader.textContent = 'Equipe nao encontrada';
         teamSubtitle.textContent = 'Nao foi possivel carregar a equipe solicitada';
@@ -140,7 +148,7 @@ function renderTeam(team) {
                             <p class="member-email">${escapeHtml(member.email)}</p>
                             <p>${escapeHtml(role.label)}</p>
                         </div>
-                        <span class="pill ${role.css} member-role">${escapeHtml(role.label)}</span> <button type="button" data-edit-member="${member.user_team_id}">Alterar cargo</button> <button type="button" data-remove-member="${member.user_team_id}">Remover</button>
+                            <div class="member-actions"><span class="pill ${role.css} member-role">${escapeHtml(role.label)}</span><button class="member-action-button member-action-edit" type="button" data-edit-member="${member.user_team_id}"><span aria-hidden="true">✎</span> Alterar cargo</button><button class="member-action-button member-action-remove" type="button" data-remove-member="${member.user_team_id}"><span aria-hidden="true">×</span> Remover</button></div>
                     </li>
                 `;
             })
@@ -210,7 +218,7 @@ detailDocumentList.addEventListener('click', (event) => {
     const isAllowed = docCard.classList.contains('allowed');
 
     if (!isAllowed) {
-        alert('Você não tem permissão para descensurar este documento.');
+        showTeamMessage('Você não tem permissão para descensurar este documento.', 'error');
         return;
     }
 
@@ -274,23 +282,267 @@ async function teamAction(path, method, body) {
     if (!response.ok) throw new Error(data.detail || 'Operação não autorizada.');
     return data;
 }
-document.getElementById('editTeam')?.addEventListener('click', async()=>{
-    const name=prompt('Nome da equipe:'); if(name===null)return;
-    const description=prompt('Descrição da equipe (deixe vazio para limpar):'); if(description===null)return;
-    try {await teamAction('', 'PATCH', {nome:name, descricao:description}); await loadTeam();} catch(e){alert(e.message);}
+function showTeamMessage(message, type = 'success') {
+    const element = document.getElementById('teamActionMessage');
+    if (!element) return;
+    clearTimeout(teamActionMessageTimer);
+    element.textContent = message;
+    element.className = `team-action-message ${type}`;
+    element.hidden = false;
+    teamActionMessageTimer = setTimeout(() => { element.hidden = true; }, 5000);
+}
+
+function openTeamModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+}
+
+function closeTeamModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    if (!document.querySelector('.modal-overlay.open')) {
+        document.body.classList.remove('modal-open');
+    }
+}
+
+document.querySelectorAll('[data-close-team-modal]').forEach((button) => {
+    button.addEventListener('click', () => closeTeamModal(button.dataset.closeTeamModal));
 });
-document.getElementById('deleteTeam')?.addEventListener('click', async()=>{
-    if(!confirm('Excluir esta equipe? A exclusão é bloqueada se houver documentos vinculados.'))return;
-    try {await teamAction('', 'DELETE'); location.href='equipes.html';} catch(e){alert(e.message);}
+document.querySelectorAll('.modal-overlay').forEach((modal) => {
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeTeamModal(modal.id);
+    });
 });
-document.getElementById('addTeamMember')?.addEventListener('click', async()=>{
-    const user_id=Number(prompt('ID do usuário na organização:')); if(!user_id)return;
-    try {await teamAction('/membros','POST',{user_id}); await loadTeam();} catch(e){alert(e.message);}
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.open').forEach((modal) => closeTeamModal(modal.id));
+    }
 });
-detailMemberList.addEventListener('click', async(event)=>{
-    const edit=event.target.closest('[data-edit-member]');
-    if(edit){const cargo_id=Number(prompt('ID do cargo (membro=1, supervisor=2, líder=3 conforme configuração):')); if(!cargo_id)return; try{await teamAction(`/membros/${edit.dataset.editMember}`,'PATCH',{cargo_id}); await loadTeam();}catch(e){alert(e.message);} return;}
-    const button=event.target.closest('[data-remove-member]'); if(!button)return;
-    if(!confirm('Remover este membro? Vínculos com documentos não podem ser removidos.'))return;
-    try {await teamAction(`/membros/${button.dataset.removeMember}`,'DELETE'); await loadTeam();} catch(e){alert(e.message);}
+
+document.getElementById('editTeam')?.addEventListener('click', () => {
+    if (!currentTeam) return;
+    document.getElementById('editTeamName').value = currentTeam.nome || '';
+    openTeamModal('editTeamModal');
+    document.getElementById('editTeamName').focus();
+});
+document.getElementById('editTeamForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = document.getElementById('editTeamName').value.trim();
+    if (!name) {
+        showTeamMessage('Informe o nome da equipe.', 'error');
+        return;
+    }
+    const submitButton = event.currentTarget.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    try {
+        await teamAction('', 'PATCH', { nome: name });
+        closeTeamModal('editTeamModal');
+        await loadTeam();
+        showTeamMessage('Nome da equipe atualizado.');
+    } catch (error) {
+        showTeamMessage(error.message || 'Não foi possível atualizar a equipe.', 'error');
+    } finally {
+        submitButton.disabled = false;
+    }
+});
+
+function renderTeamMemberCandidates(users) {
+    const container = document.getElementById('teamMemberCandidates');
+    teamMemberCandidates = users;
+    if (!users.length) {
+        container.innerHTML = '<li class="empty-state small"><strong>Nenhum usuário disponível</strong><span>Altere a pesquisa ou verifique os usuários da organização.</span></li>';
+        return;
+    }
+    container.innerHTML = users.map((user) => {
+        const selected = selectedTeamMembers.has(Number(user.user_id));
+        return `<li class="candidate-item ${selected ? 'selected' : ''}"><div><strong>${escapeHtml(user.nome)}</strong><p>${escapeHtml(user.email)}</p></div><button class="candidate-action" type="button" data-select-team-member="${Number(user.user_id)}" aria-pressed="${selected}">${selected ? 'Selecionado' : 'Selecionar'}</button></li>`;
+    }).join('');
+}
+
+function renderSelectedTeamMembers() {
+    const container = document.getElementById('teamSelectedMembers');
+    const count = document.getElementById('teamSelectedCount');
+    const submit = document.getElementById('confirmAddTeamMembers');
+    const selected = Array.from(selectedTeamMembers.values());
+    count.textContent = String(selected.length);
+    submit.disabled = selected.length === 0;
+    container.innerHTML = selected.length
+        ? selected.map((user) => `<button type="button" class="selected-chip" data-remove-team-member="${Number(user.user_id)}">${escapeHtml(user.nome)} <span aria-hidden="true">×</span></button>`).join('')
+        : '<span class="empty-chip">Nenhum usuário selecionado</span>';
+}
+
+async function loadTeamMemberCandidates(query = '') {
+    const container = document.getElementById('teamMemberCandidates');
+    container.innerHTML = '<li class="empty-state small"><strong>Buscando usuários</strong><span>Aguarde um instante.</span></li>';
+    const endpoint = new URL(`${API_BASE}/form-data`);
+    endpoint.searchParams.set('team_id', String(getTeamId()));
+    if (query.trim()) endpoint.searchParams.set('query', query.trim());
+    try {
+        const response = await fetch(endpoint.toString(), {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Não foi possível carregar os usuários.');
+        const availableUsers = data.usuarios_disponiveis || [];
+        teamRoles = data.cargos_disponiveis || [];
+        renderTeamMemberCandidates(availableUsers);
+        // Mantém em estado os usuários escolhidos mesmo quando a busca muda.
+        availableUsers.forEach((user) => {
+            if (selectedTeamMembers.has(Number(user.user_id))) {
+                selectedTeamMembers.set(Number(user.user_id), user);
+            }
+        });
+        renderSelectedTeamMembers();
+    } catch (error) {
+        container.innerHTML = `<li class="empty-state small"><strong>Falha ao carregar</strong><span>${escapeHtml(error.message)}</span></li>`;
+    }
+}
+
+document.getElementById('addTeamMember')?.addEventListener('click', () => {
+    if (!currentTeam) return;
+    selectedTeamMembers.clear();
+    document.getElementById('teamMemberSearch').value = '';
+    renderSelectedTeamMembers();
+    openTeamModal('addTeamMemberModal');
+    loadTeamMemberCandidates();
+    document.getElementById('teamMemberSearch').focus();
+});
+document.getElementById('teamMemberSearch')?.addEventListener('input', (event) => {
+    clearTimeout(teamMemberSearchTimer);
+    teamMemberSearchTimer = setTimeout(() => loadTeamMemberCandidates(event.target.value), 250);
+});
+document.getElementById('teamMemberCandidates')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-select-team-member]');
+    if (!button) return;
+    const userId = Number(button.dataset.selectTeamMember);
+        const user = teamMemberCandidates.find((candidate) => Number(candidate.user_id) === userId);
+    if (user) selectedTeamMembers.set(userId, user);
+    renderSelectedTeamMembers();
+    renderTeamMemberCandidates(teamMemberCandidates);
+});
+document.getElementById('teamSelectedMembers')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-team-member]');
+    if (!button) return;
+    selectedTeamMembers.delete(Number(button.dataset.removeTeamMember));
+    renderSelectedTeamMembers();
+    renderTeamMemberCandidates(teamMemberCandidates);
+});
+
+document.getElementById('confirmAddTeamMembers')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const selected = Array.from(selectedTeamMembers.values());
+    if (!selected.length) return;
+    button.disabled = true;
+    let added = 0;
+    try {
+        for (const user of selected) {
+            await teamAction('/membros', 'POST', { user_id: Number(user.user_id) });
+            added += 1;
+        }
+        closeTeamModal('addTeamMemberModal');
+        selectedTeamMembers.clear();
+        await loadTeam();
+        showTeamMessage(`${added} membro(s) adicionado(s) à equipe.`);
+    } catch (error) {
+        if (added > 0) {
+            closeTeamModal('addTeamMemberModal');
+            selectedTeamMembers.clear();
+            await loadTeam();
+        }
+        showTeamMessage(added
+            ? `${added} membro(s) adicionado(s); não foi possível concluir os demais. ${error.message}`
+            : error.message || 'Não foi possível adicionar os membros.', 'error');
+    } finally {
+        button.disabled = selectedTeamMembers.size === 0;
+    }
+});
+
+document.getElementById('deleteTeam')?.addEventListener('click', () => {
+    if (!currentTeam) return;
+    document.getElementById('deleteTeamName').textContent = currentTeam.nome;
+    openTeamModal('deleteTeamModal');
+});
+document.getElementById('confirmDeleteTeam')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await teamAction('', 'DELETE');
+        showTeamMessage('Equipe excluída.');
+        closeTeamModal('deleteTeamModal');
+        setTimeout(() => { window.location.href = 'equipes.html'; }, 1600);
+    } catch (error) {
+        showTeamMessage(error.message || 'Não foi possível excluir a equipe.', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+function showModalError(elementId, message) {
+    const element = document.getElementById(elementId);
+    element.textContent = message || '';
+    element.hidden = !message;
+}
+
+function openEditMemberModal(member) {
+    pendingMemberAction = { type: 'edit', userTeamId: member.user_team_id };
+    document.getElementById('editMemberName').textContent = `${member.nome} · ${member.email}`;
+    const select = document.getElementById('editMemberRole');
+    select.innerHTML = teamRoles.map((role) => `<option value="${Number(role.cargo_id)}">${escapeHtml(role.nome)}</option>`).join('');
+    select.value = String(member.cargo_id || '');
+    showModalError('editMemberError', '');
+    openTeamModal('editMemberModal');
+    select.focus();
+}
+
+function openRemoveMemberModal(member) {
+    pendingMemberAction = { type: 'remove', userTeamId: member.user_team_id };
+    document.getElementById('removeMemberName').textContent = member.nome;
+    showModalError('removeMemberError', '');
+    openTeamModal('removeMemberModal');
+}
+
+detailMemberList.addEventListener('click', (event) => {
+    const edit = event.target.closest('[data-edit-member]');
+    const remove = event.target.closest('[data-remove-member]');
+    if (!edit && !remove) return;
+    const userTeamId = Number((edit || remove).dataset.editMember || (edit || remove).dataset.removeMember);
+    const member = (currentTeam?.membros_lista || []).find((item) => Number(item.user_team_id) === userTeamId);
+    if (!member) return;
+    if (edit) openEditMemberModal(member);
+    else openRemoveMemberModal(member);
+});
+
+document.getElementById('confirmEditMember')?.addEventListener('click', async (event) => {
+    if (!pendingMemberAction || pendingMemberAction.type !== 'edit') return;
+    const button = event.currentTarget;
+    const cargoId = Number(document.getElementById('editMemberRole').value);
+    if (!cargoId) { showModalError('editMemberError', 'Selecione um cargo.'); return; }
+    button.disabled = true;
+    try {
+        await teamAction(`/membros/${pendingMemberAction.userTeamId}`, 'PATCH', { cargo_id: cargoId });
+        closeTeamModal('editMemberModal');
+        await loadTeam();
+        showTeamMessage('Cargo atualizado.');
+    } catch (error) {
+        showModalError('editMemberError', error.message || 'Não foi possível atualizar o cargo.');
+    } finally { button.disabled = false; }
+});
+
+document.getElementById('confirmRemoveMember')?.addEventListener('click', async (event) => {
+    if (!pendingMemberAction || pendingMemberAction.type !== 'remove') return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await teamAction(`/membros/${pendingMemberAction.userTeamId}`, 'DELETE');
+        closeTeamModal('removeMemberModal');
+        await loadTeam();
+        showTeamMessage('Membro removido.');
+    } catch (error) {
+        showModalError('removeMemberError', error.message || 'Não foi possível remover o membro.');
+    } finally { button.disabled = false; }
 });

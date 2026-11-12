@@ -190,7 +190,8 @@
 
 .doc-actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
+    flex-wrap: wrap;
     gap: 0.6rem;
 }
 
@@ -342,6 +343,106 @@
     box-shadow: 0 12px 24px rgba(0, 230, 118, 0.25);
 }
 
+.docs-action-message {
+    padding: 0.9rem 1rem;
+    border: 1px solid rgba(0, 230, 118, 0.3);
+    border-radius: 14px;
+    background: rgba(0, 230, 118, 0.08);
+    color: var(--primary);
+}
+
+.docs-action-message.error {
+    border-color: rgba(255, 91, 107, 0.45);
+    background: rgba(255, 91, 107, 0.08);
+    color: #ff9aa5;
+}
+
+.doc-card .danger-button,
+.doc-modal__actions .danger-button {
+    border: 1px solid rgba(255, 91, 107, 0.45);
+    border-radius: 999px;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 91, 107, 0.12);
+    color: #ff9aa5;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.doc-card .danger-button:hover,
+.doc-modal__actions .danger-button:hover {
+    background: rgba(255, 91, 107, 0.2);
+}
+
+.danger-button:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.doc-modal[hidden] {
+    display: none;
+}
+
+.doc-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(3, 7, 14, 0.78);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+
+.doc-modal.open {
+    opacity: 1;
+}
+
+.doc-modal__panel {
+    width: min(100%, 520px);
+    display: grid;
+    gap: 0.8rem;
+    padding: 1.4rem;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: linear-gradient(160deg, var(--surface), var(--surface-2));
+    box-shadow: var(--shadow);
+    color: var(--text);
+}
+
+.doc-modal__panel h2,
+.doc-modal__panel p {
+    margin: 0;
+}
+
+.doc-modal__panel strong {
+    color: var(--white);
+    overflow-wrap: anywhere;
+}
+
+.doc-modal__error {
+    min-height: 1.2em;
+    color: #ff9aa5;
+}
+
+.doc-modal__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    margin-top: 0.4rem;
+}
+
+.doc-modal__actions .ghost-button {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.75rem 1rem;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+
 @keyframes scanDown {
     0% {
         top: -18%;
@@ -409,6 +510,14 @@
         width: 100%;
     }
 
+    .doc-modal__actions {
+        flex-direction: column-reverse;
+    }
+
+    .doc-modal__actions button {
+        width: 100%;
+    }
+
     .loading-page {
         min-height: 360px;
     }
@@ -417,3 +526,4 @@
         min-height: 280px;
     }
 }
+

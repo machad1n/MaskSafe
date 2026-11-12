@@ -14,14 +14,19 @@ const metaStatus = document.getElementById('metaStatus');
 const metaKey = document.getElementById('metaKey');
 const openCensoredBtn = document.getElementById('openCensoredBtn');
 const startRedactionBtn = document.getElementById('startRedactionBtn');
+const viewOriginalBtn = document.getElementById('viewOriginalBtn');
 
 const API_DOCUMENT = `${API_ROOT}/documentos/censurados`;
 const docId = Number(new URLSearchParams(window.location.search).get('doc_id'));
 
 const storedName = localStorage.getItem('userName') || 'Usuario';
 let previewObjectUrl = null;
+let previewTimeoutId = null;
+let previewGeneration = 0;
 let podeDescensurar = false;
 let cargoNivelAtual = 0;
+let previewUrlCensurado = null;
+let visualizandoOriginal = false;
 
 function escapeHtml(value) {
     return String(value)
@@ -74,13 +79,85 @@ function securityLabel(level) {
 }
 
 function clearPreviewUrl() {
+    clearTimeout(previewTimeoutId);
+    previewTimeoutId = null;
     if (previewObjectUrl) {
         URL.revokeObjectURL(previewObjectUrl);
         previewObjectUrl = null;
     }
 }
 
+function handleUnauthorized() {
+    if (window.AppShell?.Sessao?.limpar) {
+        window.AppShell.Sessao.limpar();
+    } else {
+        localStorage.removeItem('token');
+    }
+    window.location.href = '../auth/login.html';
+}
+
+function showPreviewFallback(title, message) {
+    docPreviewFallback.innerHTML = `<strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>`;
+    docPreviewFallback.hidden = false;
+}
+
+async function loadPdfPreview(url, label) {
+    const generation = ++previewGeneration;
+    const token = localStorage.getItem('token');
+    clearPreviewUrl();
+    docPreviewFrame.onload = null;
+    docPreviewFrame.onerror = null;
+    docPreviewFrame.src = 'about:blank';
+    showPreviewFallback('Carregando preview', `Carregando ${label}.`);
+    if (!token) {
+        handleUnauthorized();
+        return;
+    }
+
+    try {
+        const response = await fetch(apiUrl(url), {
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.status === 401) {
+            handleUnauthorized();
+            return;
+        }
+        if (!response.ok) {
+            throw new Error(`Não foi possível carregar ${label} (HTTP ${response.status}).`);
+        }
+        const blob = await response.blob();
+        if (!blob.size || !(await blob.slice(0, 5).text()).startsWith('%PDF-')) {
+            throw new Error('A resposta recebida não é um PDF válido.');
+        }
+        if (generation !== previewGeneration) return;
+
+        previewObjectUrl = URL.createObjectURL(blob);
+        docPreviewFrame.onload = () => {
+            if (generation !== previewGeneration) return;
+            clearTimeout(previewTimeoutId);
+            docPreviewFallback.hidden = true;
+        };
+        docPreviewFrame.onerror = () => {
+            if (generation === previewGeneration) {
+                showPreviewFallback('Preview indisponível', 'O navegador não conseguiu renderizar este PDF.');
+            }
+        };
+        docPreviewFrame.src = previewObjectUrl;
+        previewTimeoutId = setTimeout(() => {
+            if (generation === previewGeneration) {
+                showPreviewFallback('O preview está demorando', 'O navegador ainda não confirmou a renderização do PDF. Atualize a página se o problema persistir.');
+            }
+        }, 12000);
+    } catch (error) {
+        if (generation !== previewGeneration) return;
+        console.error(error);
+        showPreviewFallback('Preview indisponível', error.message || 'Não foi possível carregar o documento autorizado.');
+    }
+}
+
 function resetPage(message = 'Selecione um documento permitido para iniciar a descensura.') {
+    previewGeneration += 1;
     docTitle.textContent = 'Documento indisponivel';
     docSubtitle.textContent = message;
     docAccessLabel.textContent = 'Sem dados';
@@ -94,6 +171,9 @@ function resetPage(message = 'Selecione um documento permitido para iniciar a de
     metaKey.textContent = '-';
     clearPreviewUrl();
     docPreviewFrame.src = 'about:blank';
+    viewOriginalBtn.hidden = true;
+    viewOriginalBtn.setAttribute('aria-pressed', 'false');
+    visualizandoOriginal = false;
     docPreviewFallback.hidden = false;
     docPreviewFallback.innerHTML = `
         <strong>Documento indisponível</strong>
@@ -104,7 +184,7 @@ function resetPage(message = 'Selecione um documento permitido para iniciar a de
 async function loadDocument() {
     const token = localStorage.getItem('token');
     if (!token) {
-        window.location.href = '../auth/login.html';
+        handleUnauthorized();
         return;
     }
 
@@ -114,20 +194,20 @@ async function loadDocument() {
     }
 
     try {
-        const response = await fetch(`${API_DOCUMENT}/${docId}`, {
+        const response = await fetch(apiUrl(`/documentos/censurados/${docId}`), {
+            cache: 'no-store',
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
 
         if (response.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '../auth/login.html';
+            handleUnauthorized();
             return;
         }
 
         if (response.status === 404) {
-            alert('Você não tem permissão para acessar este documento.');
+            resetPage('Este documento não existe ou sua equipe não tem acesso.');
             window.location.href = 'censurados.html';
             return;
         }
@@ -152,6 +232,11 @@ async function loadDocument() {
         podeDescensurar = Boolean(documento.pode_descensurar || documento.pode_descensura_parcial);
         startRedactionBtn.disabled = !podeDescensurar;
         cargoNivelAtual = Number(documento.cargo_usuario?.nivel || 0);
+        previewUrlCensurado = documento.preview_url || null;
+        visualizandoOriginal = false;
+        viewOriginalBtn.hidden = cargoNivelAtual < 3;
+        viewOriginalBtn.textContent = 'Ver arquivo original';
+        viewOriginalBtn.setAttribute('aria-pressed', 'false');
         if (podeDescensurar) {
             const cargo = documento.cargo_usuario?.nome || 'lider';
             if (cargoNivelAtual >= 3) {
@@ -164,44 +249,11 @@ async function loadDocument() {
             startRedactionBtn.textContent = 'Sem permissão para descensura';
         }
 
-        clearPreviewUrl();
-        docPreviewFallback.hidden = false;
-        docPreviewFallback.innerHTML = `
-            <strong>Carregando preview</strong>
-            <p>Buscando o documento para exibição segura.</p>
-        `;
-        docPreviewFrame.src = 'about:blank';
-        docPreviewFrame.onload = null;
-
-        if (documento.preview_url) {
-            const previewResponse = await fetch(`${API_ROOT}${documento.preview_url}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-
-            if (previewResponse.ok) {
-                const blob = await previewResponse.blob();
-                previewObjectUrl = URL.createObjectURL(blob);
-                docPreviewFrame.onload = () => {
-                    docPreviewFallback.hidden = true;
-                };
-                docPreviewFrame.style.zIndex = '1';
-                docPreviewFrame.src = previewObjectUrl;
-                docPreviewFallback.hidden = true;
-            } else {
-                docPreviewFallback.innerHTML = `
-                    <strong>Preview indisponível</strong>
-                    <p>O arquivo foi carregado, mas não pôde ser renderizado neste navegador.</p>
-                `;
-                docPreviewFallback.hidden = false;
-            }
+        if (previewUrlCensurado) {
+            docPreviewFrame.title = 'Preview do documento censurado';
+            await loadPdfPreview(previewUrlCensurado, 'o documento censurado');
         } else {
-            docPreviewFallback.innerHTML = `
-                <strong>Preview indisponível</strong>
-                <p>Este documento não possui arquivo para exibição.</p>
-            `;
-            docPreviewFallback.hidden = false;
+            showPreviewFallback('Preview indisponível', 'Este documento não possui um endereço de arquivo para exibição.');
         }
     } catch (error) {
         console.error(error);
@@ -217,15 +269,25 @@ openCensoredBtn.addEventListener('click', () => {
     window.location.href = `censurados.html?doc_id=${docId}`;
 });
 
+viewOriginalBtn.addEventListener('click', async () => {
+    if (cargoNivelAtual < 3 || !previewUrlCensurado) return;
+    visualizandoOriginal = !visualizandoOriginal;
+    viewOriginalBtn.textContent = visualizandoOriginal ? 'Voltar ao documento censurado' : 'Ver arquivo original';
+    viewOriginalBtn.setAttribute('aria-pressed', String(visualizandoOriginal));
+    const url = visualizandoOriginal ? `/documentos/${docId}/original` : previewUrlCensurado;
+    docPreviewFrame.title = visualizandoOriginal ? 'Preview do arquivo original' : 'Preview do documento censurado';
+    await loadPdfPreview(url, visualizandoOriginal ? 'o arquivo original' : 'o documento censurado');
+});
+
 startRedactionBtn.addEventListener('click', async () => {
     const token = localStorage.getItem('token');
     if (!token) {
-        window.location.href = '../auth/login.html';
+        handleUnauthorized();
         return;
     }
 
     if (!podeDescensurar) {
-        alert('Seu cargo não permite acessar a versão original do documento.');
+        showPreviewFallback('Acesso não permitido', 'Seu cargo não permite descensurar este documento.');
         return;
     }
 
@@ -233,20 +295,21 @@ startRedactionBtn.addEventListener('click', async () => {
         startRedactionBtn.disabled = true;
         startRedactionBtn.textContent = 'Baixando...';
 
-        const response = await fetch(`${API_ROOT}/documentos/${docId}/parcial`, {
+        const rota = cargoNivelAtual >= 3 ? 'original' : 'parcial';
+        const response = await fetch(apiUrl(`/documentos/${docId}/${rota}`), {
+            cache: 'no-store',
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
 
         if (response.status === 403) {
-            alert('Seu cargo não permite acessar a versão original do documento.');
+            showPreviewFallback('Acesso não permitido', 'Seu cargo não permite acessar esta versão do documento.');
             return;
         }
 
         if (response.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '../auth/login.html';
+            handleUnauthorized();
             return;
         }
 
@@ -255,17 +318,22 @@ startRedactionBtn.addEventListener('click', async () => {
         }
 
         const blob = await response.blob();
+        if (!blob.size || !(await blob.slice(0, 5).text()).startsWith('%PDF-')) {
+            throw new Error('A resposta recebida não é um PDF válido.');
+        }
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${docTitle.textContent}_descensurado.pdf`;
+        link.download = cargoNivelAtual >= 3
+            ? `${docTitle.textContent}_original.pdf`
+            : `${docTitle.textContent}_descensurado_parcial.pdf`;
         document.body.appendChild(link);
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
     } catch (error) {
         console.error(error);
-        alert('Não foi possível baixar a descensura do documento.');
+        showPreviewFallback('Falha ao baixar o documento', error.message || 'Não foi possível baixar esta versão.');
     } finally {
         startRedactionBtn.disabled = !podeDescensurar;
         startRedactionBtn.textContent = !podeDescensurar ? 'Sem permissão para descensura'
@@ -273,6 +341,29 @@ startRedactionBtn.addEventListener('click', async () => {
     }
 });
 
-window.addEventListener('beforeunload', clearPreviewUrl);
+window.addEventListener('pagehide', () => {
+    previewGeneration += 1;
+    clearPreviewUrl();
+    docPreviewFrame.onload = null;
+    docPreviewFrame.onerror = null;
+    docPreviewFrame.src = 'about:blank';
+});
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) loadDocument();
+});
+window.addEventListener('storage', (event) => {
+    if (event.key !== 'token') return;
+    if (!event.newValue) {
+        previewGeneration += 1;
+        clearPreviewUrl();
+        docPreviewFrame.src = 'about:blank';
+        handleUnauthorized();
+        return;
+    }
+    loadDocument();
+});
 
 loadDocument();
+
+
+

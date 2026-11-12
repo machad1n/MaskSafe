@@ -126,7 +126,14 @@ if __name__ == "__main__":
 
 # --- cartao de credito ------------------------------------------------------
 
-from scanner.patterns import CARTAO_PATTERN, cartao_valido  # noqa: E402
+from scanner.patterns import (  # noqa: E402
+    CARTAO_CVV_PATTERN,
+    CARTAO_PATTERN,
+    CARTAO_TITULAR_PATTERN,
+    CARTAO_VALIDADE_PATTERN,
+    bandeira_cartao,
+    cartao_valido,
+)
 
 
 def test_cartao_valido_aceita_numero_com_luhn_correto():
@@ -140,6 +147,28 @@ def test_cartao_valido_recusa_luhn_errado_ou_tamanho_fora():
     assert not cartao_valido("1234 5678")
 
 
+def test_cartao_valido_reconhece_principais_bandeiras():
+    cartoes = {
+        "4111 1111 1111 1111": "VISA",
+        "5555-5555-5555-4444": "MASTERCARD",
+        "2221000000000009": "MASTERCARD",
+        "378282246310005": "AMEX",
+        "6011111111111117": "DISCOVER",
+        "30569309025904": "DINERS",
+        "3530111333300000": "JCB",
+        "6200000000000005": "UNIONPAY",
+        "5066991234560001": "ELO",
+        "6062821234560002": "HIPERCARD",
+    }
+    for numero, bandeira in cartoes.items():
+        assert bandeira_cartao(numero) == bandeira
+        assert cartao_valido(numero)
+
+
+def test_cartao_recusa_numero_com_luhn_valido_fora_de_faixa_conhecida():
+    assert not cartao_valido("1234567890120")
+
+
 def test_padrao_de_cartao_pega_o_numero_inteiro():
     texto = "Cartao: 4111 1111 1111 1111  Validade 12/29"
     achados = [m.group() for m in CARTAO_PATTERN.finditer(texto)]
@@ -149,3 +178,24 @@ def test_padrao_de_cartao_pega_o_numero_inteiro():
 def test_padrao_de_cartao_nao_pega_cpf_cnpj_nem_processo():
     for texto in ("123.456.789-00", "12.345.678/0001-90", "0001234-56.2026.8.26.0100"):
         assert not CARTAO_PATTERN.search(texto), texto
+
+
+def test_cvv_so_e_detectado_com_rotulo_de_seguranca():
+    assert CARTAO_CVV_PATTERN.search("CVV: 123")
+    assert CARTAO_CVV_PATTERN.search("CVC2 1234")
+    assert CARTAO_CVV_PATTERN.search("Código de segurança: 123")
+    assert not CARTAO_CVV_PATTERN.search("ano 2025, agência 123")
+
+
+def test_validade_cartao_exige_contexto_e_mes_valido():
+    assert CARTAO_VALIDADE_PATTERN.search("Validade: 03/29")
+    assert CARTAO_VALIDADE_PATTERN.search("Valid thru 12/2029")
+    assert not CARTAO_VALIDADE_PATTERN.search("data 03/29")
+    assert not CARTAO_VALIDADE_PATTERN.search("validade 13/29")
+
+
+def test_nome_do_titular_exige_marcador_contextual():
+    assert CARTAO_TITULAR_PATTERN.search("Nome do titular: ANA SILVA")
+    assert CARTAO_TITULAR_PATTERN.search("Cardholder name: MARIA SANTOS")
+    assert not CARTAO_TITULAR_PATTERN.search("ANA SILVA")
+

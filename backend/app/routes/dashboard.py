@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy import case, desc, func, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.current_user import get_current_user
 from app.database import get_db
@@ -18,6 +18,7 @@ def get_dashboard_overview(
         current_user: Usuario = Depends(get_current_user)
     ):
     # Equipes do usuario e contagem de documentos por equipe.
+    vinculo_documento = aliased(UsuarioEquipe)
     team_rows = (
         db.query(
             Equipe.team_id,
@@ -25,60 +26,42 @@ def get_dashboard_overview(
             func.count(func.distinct(Documento.doc_id)).label("documentos")
         )
         .join(UsuarioEquipe, UsuarioEquipe.team_id == Equipe.team_id)
-        .outerjoin(Documento, (Documento.user_team_id == UsuarioEquipe.user_team_id) & Documento.ativo.is_(True))
+        .outerjoin(vinculo_documento, vinculo_documento.team_id == Equipe.team_id)
+        .outerjoin(Documento, (Documento.user_team_id == vinculo_documento.user_team_id) & Documento.ativo.is_(True))
         .filter(UsuarioEquipe.user_id == current_user.user_id)
         .group_by(Equipe.team_id, Equipe.nome)
         .order_by(desc("documentos"), Equipe.nome)
         .all()
     )
 
-    team_ids = [
-        row.team_id
-        for row in (
-            db.query(UsuarioEquipe.team_id)
-            .filter(UsuarioEquipe.user_id == current_user.user_id)
-            .distinct()
-            .all()
-        )
-    ]
+    team_ids = (
+        select(UsuarioEquipe.team_id)
+        .where(UsuarioEquipe.user_id == current_user.user_id)
+        .distinct()
+    )
 
-    total_docs = (
-        db.query(func.count(func.distinct(Documento.doc_id)))
+    # Uma passagem pelo conjunto de documentos calcula todas as métricas, em
+    # vez de executar quatro agregações separadas e materializar IDs no Python.
+    metricas = (
+        db.query(
+            func.count(func.distinct(Documento.doc_id)).label("total_docs"),
+            func.count(
+                func.distinct(
+                    case(
+                        (Documento.status_processamento == "CONCLUIDO", Documento.doc_id)
+                    )
+                )
+            ).label("docs_censurados"),
+            func.avg(Documento.nivel_seguranca).label("media_nivel"),
+            func.count(
+                func.distinct(
+                    case((Documento.nivel_seguranca >= 4, Documento.doc_id))
+                )
+            ).label("docs_nivel_alto"),
+        )
         .join(UsuarioEquipe, UsuarioEquipe.user_team_id == Documento.user_team_id)
         .filter(UsuarioEquipe.team_id.in_(team_ids), Documento.ativo.is_(True))
-        .scalar()
-        or 0
-    )
-
-    docs_censurados = (
-        db.query(func.count(func.distinct(Documento.doc_id)))
-        .join(UsuarioEquipe, UsuarioEquipe.user_team_id == Documento.user_team_id)
-        .filter(
-            UsuarioEquipe.team_id.in_(team_ids),
-            Documento.ativo.is_(True),
-            Documento.status_processamento == "CONCLUIDO",
-        )
-        .scalar()
-        or 0
-    )
-
-    media_nivel = (
-        db.query(func.avg(Documento.nivel_seguranca))
-        .join(UsuarioEquipe, UsuarioEquipe.user_team_id == Documento.user_team_id)
-        .filter(UsuarioEquipe.team_id.in_(team_ids), Documento.ativo.is_(True))
-        .scalar()
-    )
-
-    docs_nivel_alto = (
-        db.query(func.count(func.distinct(Documento.doc_id)))
-        .join(UsuarioEquipe, UsuarioEquipe.user_team_id == Documento.user_team_id)
-        .filter(
-            UsuarioEquipe.team_id.in_(team_ids),
-            Documento.ativo.is_(True),
-            Documento.nivel_seguranca >= 4
-        )
-        .scalar()
-        or 0
+        .one()
     )
 
     recent_docs = (
@@ -127,12 +110,13 @@ def get_dashboard_overview(
         },
         "metrics": {
             "total_equipes": len(equipes),
-            "total_documentos": int(total_docs),
-            "documentos_censurados": int(docs_censurados),
-            "taxa_censura": round((docs_censurados / total_docs) * 100, 1) if total_docs else 0,
-            "media_nivel_seguranca": round(float(media_nivel or 0), 2),
-            "documentos_nivel_alto": int(docs_nivel_alto)
+            "total_documentos": int(metricas.total_docs or 0),
+            "documentos_censurados": int(metricas.docs_censurados or 0),
+            "taxa_censura": round((metricas.docs_censurados / metricas.total_docs) * 100, 1) if metricas.total_docs else 0,
+            "media_nivel_seguranca": round(float(metricas.media_nivel or 0), 2),
+            "documentos_nivel_alto": int(metricas.docs_nivel_alto or 0)
         },
         "equipes": equipes,
         "documentos_recentes": documentos_recentes
     }
+

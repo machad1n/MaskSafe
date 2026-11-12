@@ -1,14 +1,17 @@
 import hashlib
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core import tenancy
 from app.core.audit import (
+    ACAO_EXCLUIR_DOCUMENTO,
     ACAO_LISTAR_DOCUMENTOS,
     ACAO_UPLOAD,
     ACAO_UPLOAD_CENSURADO,
@@ -376,6 +379,10 @@ def listar_documentos_censurados(
                 "team_id": row.team_id,
                 "equipe_nome": row.equipe_nome,
                 "user_team_id": row.user_team_id,
+                "pode_excluir": bool(
+                    (cargo_na_equipe(db, usuario_atual, row.team_id) or {}).get("nivel", 0)
+                    >= NIVEL_MIN_DESCENSURA
+                ),
             }
             for row in documentos
         ],
@@ -431,6 +438,7 @@ def obter_documento_censurado(
         "cargo_usuario": cargo,
         "pode_descensurar": bool(cargo and cargo["nivel"] >= NIVEL_MIN_DESCENSURA),
         "pode_descensura_parcial": bool(cargo),
+        "pode_excluir": bool(cargo and cargo["nivel"] >= NIVEL_MIN_DESCENSURA),
         "preview_url": f"/documentos/censurados/{documento.doc_id}/arquivo",
     }
 
@@ -764,3 +772,95 @@ async def listar_documentos_equipe(
             for d in documentos
         ]
     }
+
+
+@router.delete("/{doc_id}")
+def excluir_documento(
+    request: Request,
+    doc_id: int,
+    db: Session = Depends(get_db),
+    usuario_atual: Usuario = Depends(get_current_user),
+):
+    """Remove a ocorrência da equipe e só apaga binários sem outras referências."""
+    documento = buscar_documento_autorizado(db, usuario_atual, doc_id)
+    if not documento:
+        raise HTTPException(status_code=404, detail="Documento não encontrado ou sem acesso.")
+
+    equipe = equipe_do_documento(db, documento)
+    cargo = cargo_na_equipe(db, usuario_atual, equipe.team_id) if equipe else None
+    if not cargo or cargo["nivel"] < NIVEL_MIN_DESCENSURA:
+        raise HTTPException(status_code=403, detail="Somente a liderança da equipe pode excluir documentos.")
+
+    hash_documento = documento.hash_documento or ""
+    if not re.fullmatch(r"[a-f0-9]{64}", hash_documento):
+        raise HTTPException(status_code=409, detail="O arquivo não possui uma referência de armazenamento válida.")
+
+    caminho_censurado = Path(documento.caminho_storage).resolve(strict=False) if documento.caminho_storage else None
+    raiz_censurados = CENSURADOS_DIR.resolve(strict=True)
+    if caminho_censurado and not caminho_censurado.is_relative_to(raiz_censurados):
+        raise HTTPException(status_code=409, detail="A referência do arquivo está fora do armazenamento permitido.")
+
+    outras_referencias = (
+        db.query(Documento.hash_documento, Documento.caminho_storage)
+        .filter(Documento.doc_id != documento.doc_id)
+        .all()
+    )
+    hash_compartilhado = any(row.hash_documento == hash_documento for row in outras_referencias)
+    caminho_compartilhado = bool(caminho_censurado) and any(
+        row.caminho_storage
+        and Path(row.caminho_storage).resolve(strict=False) == caminho_censurado
+        for row in outras_referencias
+    )
+
+    candidatos: list[Path] = []
+    if not hash_compartilhado:
+        for diretorio in (ORIGINAIS_DIR, CENSURADOS_DIR):
+            if not diretorio.exists():
+                continue
+            for candidato in diretorio.glob(f"{hash_documento}*"):
+                if candidato.is_file() or candidato.is_symlink():
+                    if caminho_compartilhado and candidato.resolve(strict=False) == caminho_censurado:
+                        continue
+                    candidatos.append(candidato)
+
+    # Renomeia no mesmo volume antes do commit: se a transação falhar, os
+    # binários podem ser restaurados sem deixar o banco apontando para arquivo
+    # removido. Os nomes temporários não são encontrados pelas rotas de hash.
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for candidato in candidatos:
+            temporario = candidato.with_name(f".mask-delete-{uuid4().hex}-{candidato.name}")
+            os.replace(candidato, temporario)
+            staged.append((temporario, candidato))
+
+        db.delete(documento)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        for temporario, original in reversed(staged):
+            try:
+                if temporario.exists() or temporario.is_symlink():
+                    os.replace(temporario, original)
+            except OSError:
+                logger.exception("Falha ao restaurar arquivo durante rollback da exclusão.")
+        if isinstance(exc, HTTPException):
+            raise
+        logger.exception("Falha ao excluir documento %s.", doc_id)
+        raise HTTPException(status_code=500, detail="Não foi possível excluir o documento.") from exc
+
+    falhas_arquivo = []
+    for temporario, _ in staged:
+        try:
+            temporario.unlink(missing_ok=True)
+        except OSError:
+            falhas_arquivo.append(temporario.name)
+            logger.exception("Falha ao remover arquivo temporário da exclusão: %s", temporario)
+
+    registrar(db, request, usuario_atual.user_id, ACAO_EXCLUIR_DOCUMENTO)
+    if falhas_arquivo:
+        raise HTTPException(
+            status_code=500,
+            detail="O registro foi removido, mas alguns arquivos não puderam ser apagados fisicamente.",
+        )
+    return {"mensagem": "Documento excluído com sucesso."}
+

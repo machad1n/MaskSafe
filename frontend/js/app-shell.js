@@ -146,6 +146,7 @@
                 </button>
                 <div class="dropdown" id="userDropdown">
                     <span class="dropdown-cargo" id="userCargo"></span>
+                    <a class="dropdown-item" href="${BASE_HTML}/configuracoes.html">Configurações da conta</a>
                     <button class="dropdown-item" id="logoutBtn">Logout</button>
                 </div>
             </div>

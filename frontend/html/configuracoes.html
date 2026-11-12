@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeMask - Configurações da conta</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/dashboard.css">
+    <link rel="stylesheet" href="../css/brand.css">
+    <link rel="stylesheet" href="../css/settings.css">
+</head>
+<body>
+    <div id="appShell"></div>
+    <main class="content brand-main account-main" id="appContent">
+        <section class="brand-head reveal">
+            <div class="brand-kicker-row"><span class="kicker">Conta</span><span class="live-dot"></span></div>
+            <h2>Configurações da conta</h2>
+            <p class="subtitle">Gerencie seu perfil, sua senha e os dados pessoais da sua conta.</p>
+        </section>
+
+        <div class="account-layout">
+            <nav class="account-nav panel panel-sig" aria-label="Seções das configurações">
+                <span class="panel-kicker">Configurações</span>
+                <a href="#perfil" class="account-nav-link active">Perfil</a>
+                <a href="#seguranca" class="account-nav-link">Segurança</a>
+                <a href="#excluir-conta" class="account-nav-link danger-link">Excluir conta</a>
+            </nav>
+
+            <div class="account-sections">
+                <section id="perfil" class="panel panel-sig account-panel reveal" aria-labelledby="profileHeading">
+                    <div class="panel-header">
+                        <div><span class="panel-kicker">Seus dados</span><h3 id="profileHeading">Perfil</h3></div>
+                    </div>
+                    <p class="account-intro">Atualize seu nome, endereço de email e foto de perfil.</p>
+                    <div id="profileFeedback" class="account-feedback" role="status" aria-live="polite" hidden></div>
+                    <form id="profileForm" class="account-form" enctype="multipart/form-data">
+                        <div class="avatar-editor">
+                            <div class="avatar-preview" id="avatarPreview" aria-label="Pré-visualização da foto de perfil"><span id="avatarInitial">U</span></div>
+                            <div class="avatar-controls">
+                                <strong>Foto de perfil</strong>
+                                <p>JPEG, PNG ou WebP. Até 5 MB; a imagem será reduzida para armazenamento.</p>
+                                <label class="secondary-button" for="profilePhoto">Selecionar imagem</label>
+                                <input id="profilePhoto" name="foto" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+                                <span id="photoFileName" class="file-name">Nenhuma nova imagem selecionada</span>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field-label" for="profileName">Nome
+                                <input id="profileName" name="nome" type="text" maxlength="120" autocomplete="name" required>
+                            </label>
+                            <label class="field-label" for="profileEmail">Email
+                                <input id="profileEmail" name="email" type="email" maxlength="129" autocomplete="email" required>
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="cta-censor" id="saveProfileBtn">Salvar perfil</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="seguranca" class="panel panel-sig account-panel reveal" aria-labelledby="securityHeading">
+                    <div class="panel-header">
+                        <div><span class="panel-kicker">Acesso</span><h3 id="securityHeading">Segurança</h3></div>
+                    </div>
+                    <p class="account-intro">Escolha uma senha exclusiva. Após a alteração, outras sessões serão encerradas.</p>
+                    <div id="passwordFeedback" class="account-feedback" role="status" aria-live="polite" hidden></div>
+                    <form id="passwordForm" class="account-form">
+                        <label class="field-label" for="currentPassword">Senha atual
+                            <input id="currentPassword" name="senha_atual" type="password" minlength="1" maxlength="128" autocomplete="current-password" required>
+                        </label>
+                        <label class="field-label" for="newPassword">Nova senha
+                            <input id="newPassword" name="nova_senha" type="password" minlength="8" maxlength="72" autocomplete="new-password" required aria-describedby="passwordRequirements">
+                        </label>
+                        <ul id="passwordRequirements" class="password-requirements">
+                            <li data-requirement="length">Pelo menos 8 caracteres</li>
+                            <li data-requirement="lower">Uma letra minúscula</li>
+                            <li data-requirement="upper">Uma letra maiúscula</li>
+                            <li data-requirement="number">Um número</li>
+                        </ul>
+                        <label class="field-label" for="confirmPassword">Confirmar nova senha
+                            <input id="confirmPassword" name="confirmar_senha" type="password" minlength="8" maxlength="72" autocomplete="new-password" required>
+                        </label>
+                        <div class="form-actions"><button type="submit" class="cta-censor" id="savePasswordBtn">Alterar senha</button></div>
+                    </form>
+                </section>
+
+                <section id="excluir-conta" class="panel panel-sig account-panel delete-account-panel reveal" aria-labelledby="deleteHeading">
+                    <div class="panel-header">
+                        <div><span class="panel-kicker">Ação irreversível</span><h3 id="deleteHeading">Excluir conta</h3></div>
+                    </div>
+                    <div class="delete-warning">
+                        <strong>A exclusão da conta é definitiva.</strong>
+                        <p>Seu perfil e suas credenciais serão removidos. As equipes, os documentos e seus registros históricos serão preservados; seus vínculos com as equipes serão removidos.</p>
+                    </div>
+                    <div id="deleteFeedback" class="account-feedback" role="status" aria-live="polite" hidden></div>
+                    <button type="button" class="danger-button" id="openDeleteModalBtn">Continuar para excluir conta</button>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <div id="deleteAccountModal" class="account-modal" role="presentation" hidden>
+        <section class="account-modal-panel" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-describedby="deleteModalDescription">
+            <span class="panel-kicker">Confirmação final</span>
+            <h2 id="deleteModalTitle">Excluir sua conta?</h2>
+            <p id="deleteModalDescription">Esta ação não pode ser desfeita. Equipes, documentos e históricos existentes permanecerão no MaskSafe.</p>
+            <form id="deleteAccountForm" class="account-form">
+                <label class="field-label" for="deletePassword">Senha atual
+                    <input id="deletePassword" name="senha_atual" type="password" maxlength="128" autocomplete="current-password" required>
+                </label>
+                <label class="confirm-check"><input id="confirmDeleteCheck" type="checkbox" required> Entendo que minha conta e meus dados pessoais serão excluídos.</label>
+                <div id="deleteModalFeedback" class="account-feedback error" role="alert" aria-live="assertive" hidden></div>
+                <div class="modal-actions">
+                    <button type="button" class="secondary-button" id="cancelDeleteBtn">Cancelar</button>
+                    <button type="submit" class="danger-button" id="confirmDeleteBtn">Excluir definitivamente</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <script src="../js/config.js"></script>
+    <script src="../js/session.js"></script>
+    <script src="../js/app-shell.js"></script>
+    <script src="../js/configuracoes.js"></script>
+</body>
+</html>

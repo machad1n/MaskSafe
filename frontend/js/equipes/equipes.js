@@ -38,6 +38,18 @@ const state = {
     searchTimer: null,
 };
 
+let teamActionMessageTimer = null;
+
+function showTeamMessage(message, type = 'success') {
+    const element = document.getElementById('teamActionMessage');
+    if (!element) return;
+    clearTimeout(teamActionMessageTimer);
+    element.textContent = message;
+    element.className = `team-action-message ${type}`;
+    element.hidden = false;
+    teamActionMessageTimer = setTimeout(() => { element.hidden = true; }, 5000);
+}
+
 function escapeHtml(value) {
     return String(value)
         .replace(/&/g, '&amp;')
@@ -337,7 +349,7 @@ async function handleCreateTeam(event) {
         }
     } catch (error) {
         console.error(error);
-        alert(error.message || 'Falha ao criar equipe.');
+        showTeamMessage(error.message || 'Falha ao criar equipe.', 'error');
     }
 }
 
