@@ -144,11 +144,10 @@ async function loadPdfPreview(url, label) {
             }
         };
         docPreviewFrame.src = previewObjectUrl;
-        previewTimeoutId = setTimeout(() => {
-            if (generation === previewGeneration) {
-                showPreviewFallback('O preview está demorando', 'O navegador ainda não confirmou a renderização do PDF. Atualize a página se o problema persistir.');
-            }
-        }, 12000);
+        // O visualizador nativo de PDF pode não disparar `iframe.onload`
+        // para Blob URLs. Como o conteúdo já foi validado como PDF acima,
+        // remova o overlay imediatamente após entregar o blob ao iframe.
+        docPreviewFallback.hidden = true;
     } catch (error) {
         if (generation !== previewGeneration) return;
         console.error(error);
@@ -364,6 +363,10 @@ window.addEventListener('storage', (event) => {
 });
 
 loadDocument();
+
+
+
+
 
 
 
