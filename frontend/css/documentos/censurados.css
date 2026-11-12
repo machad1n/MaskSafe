@@ -280,6 +280,12 @@
     background: rgba(10, 14, 23, 0.9);
 }
 
+/* A regra acima define display:grid; sem esta exceção ela sobrescreve
+   o comportamento visual padrão do atributo HTML hidden. */
+.preview-fallback[hidden] {
+    display: none;
+}
+
 .preview-fallback strong {
     display: block;
     margin-bottom: 0.35rem;
@@ -526,4 +532,6 @@
         min-height: 280px;
     }
 }
+
+
 
